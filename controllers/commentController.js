@@ -3,6 +3,10 @@ const { ObjectId } = require('mongodb');
 const jwt = require('jsonwebtoken');
 const jwtSecret = process.env.JWT_SECRET;
 
+if (!jwtSecret) {
+    throw new Error('JWT_SECRET 환경 변수가 설정되지 않았습니다.');
+}
+
 // JWT 인증 미들웨어
 function authenticateJWT(req, res, next) {
    const token = req.header("Authorization")?.split(" ")[1];

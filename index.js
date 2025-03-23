@@ -17,6 +17,10 @@ const http = require('http').createServer(app);
 const port = process.env.PORT || 3001;
 const jwtSecret = process.env.JWT_SECRET;
 
+if (!jwtSecret) {
+    throw new Error('JWT_SECRET 환경 변수가 설정되지 않았습니다.');
+}
+
 app.set('trust proxy', 1);
 
 (async () => {
@@ -59,12 +63,12 @@ const verifyToken = async (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
     
     if (!token) {
-        return next(); // 토큰이 없으면 다음 미들웨어로 진행 (인증되지 않은 요청)
+        return next();
     }
 
     try {
         const decoded = jwt.verify(token, jwtSecret);
-        req.user = decoded; // 디코딩된 사용자 정보를 req 객체에 추가
+        req.user = decoded;
         next();
     } catch (error) {
         return res.status(401).json({ error: '유효하지 않은 토큰입니다.' });

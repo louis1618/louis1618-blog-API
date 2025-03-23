@@ -190,6 +190,10 @@ function authenticateJWT(req, res, next) {
  const jwt = require('jsonwebtoken');
  const jwtSecret = process.env.JWT_SECRET;
 
+ if (!jwtSecret) {
+     throw new Error('JWT_SECRET 환경 변수가 설정되지 않았습니다.');
+ }
+
  jwt.verify(token, jwtSecret, (err, user) => {
    if (err) return res.status(403).json({ message: '토큰이 유효하지 않습니다.' });
    req.user = user;
