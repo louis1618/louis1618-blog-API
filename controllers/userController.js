@@ -3,7 +3,23 @@ const { getUsersCollection, getIdUsedCollection } = require('../models/db.js');
 const rateLimit = require('express-rate-limit');
 const { ObjectId } = require('mongodb');
 
+const jwt = require('jsonwebtoken');
+const jwtSecret = process.env.JWT_SECRET;
+
 const saltRounds = 10;
+
+function generateToken(user) {
+    return jwt.sign(
+        { 
+            id: user._id.toString(), 
+            display_name: user.DisplayName,
+            user_handle: user.userHandle, 
+            rank: user.rank 
+        },
+        jwtSecret,
+        { expiresIn: '14d' }  // 14일 동안 유효
+    );
+}
 
 const requestLimiter = rateLimit({
     windowMs: 10 * 60 * 1000, 
@@ -36,7 +52,7 @@ function validateSignupData(DisplayName, userHandle, password) {
 // 회원가입 API
 async function signup(req, res) {
     let { DisplayName, userHandle, password } = req.body;
-    userHandle = userHandle.toLowerCase(); // 소문자 변환
+    userHandle = userHandle.toLowerCase();  // 소문자 변환
 
     try {
         const validationError = validateSignupData(DisplayName, userHandle, password);
@@ -83,7 +99,7 @@ async function signup(req, res) {
 
 async function deleteUser(req, res) {
     try {
-        if (!req.session.user) {
+        if (!req.user) {
             return res.status(401).json({ message: '로그인 상태가 아닙니다.' });
         }
 
@@ -94,7 +110,7 @@ async function deleteUser(req, res) {
         const usersCollection = getUsersCollection();
         const idUsedCollection = getIdUsedCollection();
 
-        const userId = new ObjectId(req.session.user.id);
+        const userId = new ObjectId(req.user.id);
         const user = await usersCollection.findOne({ _id: userId });
 
         if (!user) {
@@ -121,16 +137,7 @@ async function deleteUser(req, res) {
         // 계정 삭제
         await usersCollection.deleteOne({ _id: user._id });
 
-        // 세션 삭제
-        req.session.destroy((err) => {
-            if (err) {
-                console.error("세션 삭제 중 오류 발생:", err);
-                return res.status(500).json({ message: '세션 삭제 중 오류가 발생했습니다.' });
-            }
-            res.clearCookie('connect.sid', { path: '/' });
-            res.status(200).json({ message: '회원 탈퇴가 완료되었습니다.' });
-        });
-
+        res.status(200).json({ message: '회원 탈퇴가 완료되었습니다.' });
     } catch (error) {
         console.error('Delete user error:', error);
         res.status(500).json({ message: '서버 오류가 발생했습니다.' });
@@ -158,15 +165,11 @@ async function login(req, res) {
             return res.status(401).json({ message: '비밀번호가 일치하지 않습니다.' });
         }
 
-        req.session.user = {
-            id: user._id,
-            display_name: user.DisplayName,
-            user_handle: user.userHandle,
-            rank: user.rank,
-        };
+        const token = generateToken(user);
 
         res.status(200).json({
             message: '로그인 성공',
+            token,  // JWT 토큰을 응답으로 전달
             user: { display_name: user.DisplayName, user_handle: user.userHandle, rank: user.rank },
         });
     } catch (error) {
@@ -175,27 +178,32 @@ async function login(req, res) {
     }
 }
 
-// 로그아웃 API
+// 로그아웃 API (클라이언트 측에서 토큰 제거)
 async function logout(req, res) {
-    try {
-        if (!req.session) {
-            return res.status(400).json({ message: '이미 로그아웃된 상태입니다.' });
-        }
+    // JWT는 서버 측에서 특별히 처리할 필요가 없음
+    // 클라이언트에서 토큰을 삭제하는 방식으로 구현됨
+    res.status(200).json({ message: '로그아웃 되었습니다.' });
+}
 
-        req.session = null;
+// JWT 인증 미들웨어
+function authenticateJWT(req, res, next) {
+    const token = req.header("Authorization")?.split(" ")[1];
 
-        res.clearCookie('session', { path: '/', httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'Strict' });
-        res.status(200).json({ message: '로그아웃 되었습니다.' });
-    } catch (error) {
-        console.error("Logout error:", error);
-        res.status(500).json({ message: '로그아웃 중 오류가 발생했습니다.' });
+    if (!token) {
+        return res.status(401).json({ message: '인증이 필요합니다.' });
     }
+
+    jwt.verify(token, jwtSecret, (err, user) => {
+        if (err) return res.status(403).json({ message: '토큰이 유효하지 않습니다.' });
+        req.user = user;
+        next();
+    });
 }
 
 // 사용자 정보 조회 API
 function getClientUserInfo(req, res) {
-    if (req.session.user) {
-        res.status(200).json({ isAuthenticated: true, user: req.session.user });
+    if (req.user) {
+        res.status(200).json({ isAuthenticated: true, user: req.user });
     } else {
         res.status(401).json({ isAuthenticated: false, message: '인증되지 않은 사용자입니다.' });
     }    
@@ -205,6 +213,7 @@ module.exports = {
     signup: [requestLimiter, signup],
     login: [requestLimiter, login],
     logout,
-    deleteUser,
-    getClientUserInfo
+    deleteUser: [authenticateJWT, deleteUser],
+    getClientUserInfo: [authenticateJWT, getClientUserInfo],
+    authenticateJWT
 };
